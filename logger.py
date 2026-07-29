@@ -2,18 +2,14 @@ import json
 import os
 from datetime import datetime
 
-LOG_DIR = "logs"
-LOG_FILE = os.path.join(LOG_DIR, "run.jsonl")
+LOG_FILE = "run.jsonl"
 
-os.makedirs(LOG_DIR, exist_ok=True)
-
-
-def log_event(event_type, data):
-    entry = {
+def log_event(question, answer):
+    record = {
         "timestamp": datetime.utcnow().isoformat(),
-        "event": event_type,
-        "data": data
+        "question": question,
+        "answer": answer
     }
 
     with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+        f.write(json.dumps(record) + "\n")

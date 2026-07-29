@@ -1,4 +1,7 @@
+import json
 from telegram import Update
+from logger import log_event
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -21,11 +24,18 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
 
     try:
-        reply = ask_llm(user_message)
+        answer = ask_llm(user_message)
     except Exception as e:
-        reply = f"Error: {e}"
+        answer = str(e)
 
-    await update.message.reply_text(reply)
+    log_event(user_message, answer)
+
+    response = {
+        "answer": answer,
+        "log_url": "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
+    }
+
+    await update.message.reply_text(json.dumps(response))
 
 
 def main():

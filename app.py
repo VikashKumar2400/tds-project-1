@@ -1,10 +1,11 @@
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+import os
 
-from logger import log_event
 from agent import ask_llm
 
-app = FastAPI()
+app = FastAPI(title="TDS Telegram Bot")
 
 
 class Prompt(BaseModel):
@@ -19,20 +20,19 @@ def home():
     }
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
 @app.post("/chat")
 def chat(data: Prompt):
-
-    log_event("prompt", data.prompt)
-
     answer = ask_llm(data.prompt)
+    return {"response": answer}
 
-    log_event("response", answer)
 
-    return {
-        "response": answer
-    }
+@app.get("/run.jsonl")
+def get_run_log():
+    if not os.path.exists("run.jsonl"):
+        open("run.jsonl", "a").close()
+
+    return FileResponse(
+        "run.jsonl",
+        media_type="application/json",
+        filename="run.jsonl"
+    )
