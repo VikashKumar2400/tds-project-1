@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+python-dotenv
+google-genai
+pandas
+numpy
+openpyxl
+python-multipart
+python-telegram-bot==21.6
