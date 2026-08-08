@@ -31,6 +31,13 @@ def parse_json_response(text: str):
         return None
 
 
+@app.on_event("startup")
+def set_telegram_webhook():
+    if TELEGRAM_WEBHOOK_URL:
+        telegram_api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+        requests.post(telegram_api_url, json={"url": TELEGRAM_WEBHOOK_URL})
+
+
 @app.post("/chat")
 def chat(data: Prompt):
     answer = ask_llm(data.prompt)
