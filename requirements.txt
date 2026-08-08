@@ -8,3 +8,11 @@ numpy
 openpyxl
 python-multipart
 python-telegram-bot==21.6
+fastapi
+uvicorn
+requests
+python-dotenv
+google-genai
+pandas
+numpy
+openpyxl

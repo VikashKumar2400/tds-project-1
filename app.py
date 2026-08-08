@@ -18,9 +18,9 @@ class Prompt(BaseModel):
     prompt: str
 
 
-# --------------------------------
-# HOME / HEALTH CHECK
-# --------------------------------
+# =========================================================
+# HEALTH CHECK
+# =========================================================
 
 @app.get("/")
 def home():
@@ -30,9 +30,9 @@ def home():
     }
 
 
-# --------------------------------
+# =========================================================
 # JSON PARSER
-# --------------------------------
+# =========================================================
 
 def parse_json_response(text: str):
 
@@ -41,7 +41,7 @@ def parse_json_response(text: str):
 
     text = text.strip()
 
-    # Remove ```json ... ``` if Gemini returns markdown
+    # Remove markdown code fences if Gemini returns them
     text = re.sub(
         r"^```json\s*",
         "",
@@ -75,15 +75,19 @@ def parse_json_response(text: str):
     return None
 
 
-# --------------------------------
-# SET TELEGRAM WEBHOOK
-# --------------------------------
+# =========================================================
+# TELEGRAM WEBHOOK SETUP
+# =========================================================
 
 @app.on_event("startup")
 def set_telegram_webhook():
 
+    if not BOT_TOKEN:
+        print("ERROR: BOT_TOKEN is missing")
+        return
+
     if not TELEGRAM_WEBHOOK_URL:
-        print("TELEGRAM_WEBHOOK_URL is not configured.")
+        print("ERROR: TELEGRAM_WEBHOOK_URL is missing")
         return
 
     telegram_api_url = (
@@ -100,23 +104,29 @@ def set_telegram_webhook():
             timeout=10
         )
 
-        print("Telegram webhook response:")
+        print("Telegram webhook setup:")
         print(response.text)
 
     except Exception as e:
 
-        print("Failed to set Telegram webhook:")
-        print(e)
+        print("Webhook setup failed:")
+        print(str(e))
 
 
-# --------------------------------
-# OPTIONAL HTTP CHAT ENDPOINT
-# --------------------------------
+# =========================================================
+# NORMAL API CHAT ENDPOINT
+# =========================================================
 
 @app.post("/chat")
 def chat(data: Prompt):
 
-    answer = ask_llm(data.prompt)
+    try:
+
+        answer = ask_llm(data.prompt)
+
+    except Exception as e:
+
+        answer = str(e)
 
     log_event(
         data.prompt,
@@ -127,9 +137,9 @@ def chat(data: Prompt):
 
     if isinstance(parsed, dict):
 
-        # Only add log_url if the requested
-        # schema contains log_url.
-        if "log_url" in data.prompt:
+        # Add log_url only if the question asks for it
+        if "log_url" in data.prompt.lower():
+
             parsed["log_url"] = RUN_LOG_URL
 
         return parsed
@@ -140,29 +150,46 @@ def chat(data: Prompt):
     }
 
 
-# --------------------------------
+# =========================================================
 # TELEGRAM WEBHOOK
-# --------------------------------
+# =========================================================
 
 @app.post("/telegram-webhook")
 async def telegram_webhook(request: Request):
 
-    payload = await request.json()
+    try:
 
-    # Ignore updates that don't contain text messages
-    if (
-        "message" not in payload
-        or "text" not in payload["message"]
-    ):
-        return {"ok": True}
+        payload = await request.json()
 
-    user_message = payload["message"]["text"]
+    except Exception:
 
-    chat_id = payload["message"]["chat"]["id"]
+        return {
+            "ok": True
+        }
 
-    # --------------------------------
+    # Ignore non-message updates
+    if "message" not in payload:
+
+        return {
+            "ok": True
+        }
+
+    message = payload["message"]
+
+    # Ignore messages without text
+    if "text" not in message:
+
+        return {
+            "ok": True
+        }
+
+    user_message = message["text"]
+
+    chat_id = message["chat"]["id"]
+
+    # =====================================================
     # ASK LLM
-    # --------------------------------
+    # =====================================================
 
     try:
 
@@ -172,32 +199,38 @@ async def telegram_webhook(request: Request):
 
         answer = str(e)
 
-    # --------------------------------
+    # =====================================================
     # LOG
-    # --------------------------------
+    # =====================================================
 
-    log_event(
-        user_message,
-        answer
-    )
+    try:
 
-    # --------------------------------
-    # PARSE JSON
-    # --------------------------------
+        log_event(
+            user_message,
+            answer
+        )
+
+    except Exception as e:
+
+        print("Logging error:", str(e))
+
+    # =====================================================
+    # PARSE LLM RESPONSE
+    # =====================================================
 
     parsed_answer = parse_json_response(answer)
 
     if isinstance(parsed_answer, dict):
 
-        # Add log_url only when the
-        # user's requested JSON contains it.
-        if "log_url" in user_message:
+        # Only add log_url when the user requested it
+        if "log_url" in user_message.lower():
 
             parsed_answer["log_url"] = RUN_LOG_URL
 
         reply_text = json.dumps(
             parsed_answer,
-            separators=(",", ":")
+            separators=(",", ":"),
+            ensure_ascii=False
         )
 
     else:
@@ -207,12 +240,13 @@ async def telegram_webhook(request: Request):
                 "answer": answer,
                 "log_url": RUN_LOG_URL
             },
-            separators=(",", ":")
+            separators=(",", ":"),
+            ensure_ascii=False
         )
 
-    # --------------------------------
-    # SEND TELEGRAM RESPONSE
-    # --------------------------------
+    # =====================================================
+    # SEND RESPONSE TO TELEGRAM
+    # =====================================================
 
     telegram_api_url = (
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -229,26 +263,35 @@ async def telegram_webhook(request: Request):
             timeout=20
         )
 
-        print("Telegram sendMessage response:")
+        print("Telegram response:")
         print(response.text)
 
     except Exception as e:
 
-        print("Failed to send Telegram response:")
-        print(e)
+        print(
+            "Failed to send Telegram message:",
+            str(e)
+        )
 
-    return {"ok": True}
+    return {
+        "ok": True
+    }
 
 
-# --------------------------------
+# =========================================================
 # PUBLIC JSONL LOG
-# --------------------------------
+# =========================================================
 
 @app.get("/run.jsonl")
 def get_run_log():
 
     if not os.path.exists("run.jsonl"):
-        open("run.jsonl", "a").close()
+
+        open(
+            "run.jsonl",
+            "a",
+            encoding="utf-8"
+        ).close()
 
     return FileResponse(
         "run.jsonl",
