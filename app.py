@@ -1,11 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 import json
+import requests
 
 from agent import ask_llm
 from logger import log_event
+from config import BOT_TOKEN, TELEGRAM_WEBHOOK_URL, RUN_LOG_URL
 
 app = FastAPI(title="TDS Telegram Bot")
 
@@ -36,13 +38,49 @@ def chat(data: Prompt):
 
     parsed = parse_json_response(answer)
     if isinstance(parsed, dict):
-        parsed["log_url"] = "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
+        parsed["log_url"] = RUN_LOG_URL
         return parsed
 
     return {
         "answer": answer,
-        "log_url": "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
+        "log_url": RUN_LOG_URL
     }
+
+
+@app.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    payload = await request.json()
+
+    if "message" not in payload or "text" not in payload["message"]:
+        return {"ok": True}
+
+    user_message = payload["message"]["text"]
+    chat_id = payload["message"]["chat"]["id"]
+
+    try:
+        answer = ask_llm(user_message)
+    except Exception as e:
+        answer = str(e)
+
+    log_event(user_message, answer)
+
+    parsed_answer = parse_json_response(answer)
+    if parsed_answer is not None:
+        parsed_answer["log_url"] = RUN_LOG_URL
+        reply_text = json.dumps(parsed_answer)
+    else:
+        reply_text = json.dumps({
+            "answer": answer,
+            "log_url": RUN_LOG_URL,
+        })
+
+    telegram_api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(telegram_api_url, json={
+        "chat_id": chat_id,
+        "text": reply_text,
+    })
+
+    return {"ok": True}
 
 
 @app.get("/run.jsonl")
