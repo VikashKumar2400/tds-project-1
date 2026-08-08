@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
+import json
 
 from agent import ask_llm
 from logger import log_event
@@ -21,16 +22,27 @@ def home():
     }
 
 
+def parse_json_response(text: str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
 @app.post("/chat")
 def chat(data: Prompt):
     answer = ask_llm(data.prompt)
     log_event(data.prompt, answer)
 
-    response = {
+    parsed = parse_json_response(answer)
+    if isinstance(parsed, dict):
+        parsed["log_url"] = "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
+        return parsed
+
+    return {
         "answer": answer,
         "log_url": "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
     }
-    return response
 
 
 @app.get("/run.jsonl")

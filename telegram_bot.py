@@ -20,6 +20,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def parse_model_json(text: str):
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
 
@@ -29,6 +39,12 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         answer = str(e)
 
     log_event(user_message, answer)
+
+    parsed_answer = parse_model_json(answer)
+    if parsed_answer is not None:
+        parsed_answer["log_url"] = "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
+        await update.message.reply_text(json.dumps(parsed_answer))
+        return
 
     response = {
         "answer": answer,
