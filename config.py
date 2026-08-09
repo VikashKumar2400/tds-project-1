@@ -5,29 +5,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-BOT_TOKEN = os.getenv(
-    "BOT_TOKEN"
-)
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 
+AIPIPE_API_KEY = os.getenv("AIPIPE_API_KEY") or os.getenv("AIPIPE_TOKEN")
 
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY"
-)
-
-
-MODEL = os.getenv(
-    "MODEL",
-    "gemini-2.5-flash"
-)
-
+MODEL = os.getenv("MODEL", "gpt-5-mini")
 
 TELEGRAM_WEBHOOK_URL = os.getenv(
     "TELEGRAM_WEBHOOK_URL",
-    "https://tds-telegram-bot-ihrg.onrender.com/telegram-webhook"
+    "https://tds-telegram-bot-ihrg.onrender.com/telegram-webhook",
 )
-
 
 RUN_LOG_URL = os.getenv(
     "RUN_LOG_URL",
-    "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
+    "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl",
 )

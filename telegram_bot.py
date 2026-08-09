@@ -1,17 +1,19 @@
+import asyncio
 import json
-from telegram import Update
-from logger import log_event
 
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    MessageHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
 
-from config import BOT_TOKEN
 from agent import ask_llm
+from config import BOT_TOKEN, RUN_LOG_URL
+from logger import log_event
+from bot_utils import build_reply_payload
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20,18 +22,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def parse_model_json(text: str):
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-    return None
-
-
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
+    user_message = update.message.text or ""
 
     try:
         answer = ask_llm(user_message)
@@ -40,32 +32,21 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     log_event(user_message, answer)
 
-    parsed_answer = parse_model_json(answer)
-    if parsed_answer is not None:
-        parsed_answer["log_url"] = "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
-        await update.message.reply_text(json.dumps(parsed_answer))
-        return
-
-    response = {
-        "answer": answer,
-        "log_url": "https://tds-telegram-bot-ihrg.onrender.com/run.jsonl"
-    }
-
-    await update.message.reply_text(json.dumps(response))
+    payload = build_reply_payload(user_message, answer, RUN_LOG_URL)
+    await update.message.reply_text(json.dumps(payload, ensure_ascii=False))
 
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is not configured")
 
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
 
     print("Telegram bot is running...")
-
     app.run_polling()
 
-
-import asyncio
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
