@@ -1,6 +1,7 @@
 import json
 import os
 import requests
+
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from agent import ask_llm
 from bot_utils import build_reply_payload
 from config import BOT_TOKEN, RUN_LOG_URL, TELEGRAM_WEBHOOK_URL
 from logger import log_event
+
 
 app = FastAPI(title="TDS Telegram Bot")
 
@@ -19,23 +21,37 @@ class Prompt(BaseModel):
 
 @app.get("/")
 def home():
-    return {"status": "running", "project": "TDS Telegram Bot"}
+    return {
+        "status": "running",
+        "project": "TDS Telegram Bot"
+    }
 
 
 @app.on_event("startup")
 def set_telegram_webhook():
+
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN is missing")
         return
+
     if not TELEGRAM_WEBHOOK_URL:
         print("ERROR: TELEGRAM_WEBHOOK_URL is missing")
         return
 
-    telegram_api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+    telegram_api_url = (
+        f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+    )
+
     try:
-        response = requests.post(telegram_api_url, json={"url": TELEGRAM_WEBHOOK_URL}, timeout=10)
+        response = requests.post(
+            telegram_api_url,
+            json={"url": TELEGRAM_WEBHOOK_URL},
+            timeout=10
+        )
+
         print("Telegram webhook setup:")
         print(response.text)
+
     except Exception as e:
         print("Webhook setup failed:")
         print(str(e))
@@ -43,56 +59,127 @@ def set_telegram_webhook():
 
 @app.post("/chat")
 def chat(data: Prompt):
+
     try:
         answer = ask_llm(data.prompt)
+
     except Exception as e:
-        answer = str(e)
+        print("CHAT LLM ERROR:", repr(e))
+        answer = ""
 
     log_event(data.prompt, answer)
-    payload = build_reply_payload(data.prompt, answer, RUN_LOG_URL)
+
+    payload = build_reply_payload(
+        data.prompt,
+        answer,
+        RUN_LOG_URL
+    )
+
     return payload
 
 
 @app.post("/telegram-webhook")
 async def telegram_webhook(request: Request):
+
     try:
-        payload = await request.json()
-    except Exception:
+        update = await request.json()
+
+    except Exception as e:
+        print("Invalid Telegram JSON:", repr(e))
         return {"ok": True}
 
-    if "message" not in payload:
+    print("===== TELEGRAM UPDATE =====")
+    print(update)
+
+    if "message" not in update:
         return {"ok": True}
 
-    message = payload["message"]
+    message = update["message"]
+
     if "text" not in message:
         return {"ok": True}
 
     user_message = message["text"]
     chat_id = message["chat"]["id"]
 
+    print("===== USER MESSAGE =====")
+    print(user_message)
+
     try:
         answer = ask_llm(user_message)
+
     except Exception as e:
-        answer = str(e)
+        print("===== TELEGRAM LLM ERROR =====")
+        print(type(e).__name__)
+        print(str(e))
+        print("==============================")
 
-    log_event(user_message, answer)
-    payload = build_reply_payload(user_message, answer, RUN_LOG_URL)
-    reply_text = json.dumps(payload, ensure_ascii=False)
+        # Temporary diagnostic response
+        answer = ""
 
-    telegram_api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    print("===== RAW ANSWER =====")
+    print(repr(answer))
+
+    log_event(
+        user_message,
+        answer
+    )
+
+    payload = build_reply_payload(
+        user_message,
+        answer,
+        RUN_LOG_URL
+    )
+
+    print("===== FINAL PAYLOAD =====")
+    print(payload)
+
+    reply_text = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":")
+    )
+
+    telegram_api_url = (
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    )
+
     try:
-        response = requests.post(telegram_api_url, json={"chat_id": chat_id, "text": reply_text}, timeout=20)
+        response = requests.post(
+            telegram_api_url,
+            json={
+                "chat_id": chat_id,
+                "text": reply_text
+            },
+            timeout=20
+        )
+
         print("Telegram response:")
         print(response.text)
+
     except Exception as e:
-        print("Failed to send Telegram message:", str(e))
+        print("Failed to send Telegram message:")
+        print(str(e))
 
     return {"ok": True}
 
 
 @app.get("/run.jsonl")
 def get_run_log():
-    if not os.path.exists("run.jsonl"):
-        open("run.jsonl", "a", encoding="utf-8").close()
 
-    return FileResponse("run.jsonl", media_type="application/jsonl", filename="run.jsonl")
+    # IMPORTANT:
+    # This currently serves run.jsonl from the project root.
+    # We will verify that this matches logger.py.
+
+    if not os.path.exists("run.jsonl"):
+        open(
+            "run.jsonl",
+            "a",
+            encoding="utf-8"
+        ).close()
+
+    return FileResponse(
+        "run.jsonl",
+        media_type="application/jsonl",
+        filename="run.jsonl"
+    )
