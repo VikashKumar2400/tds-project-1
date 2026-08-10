@@ -8,59 +8,66 @@ from pydantic import BaseModel
 
 from agent import ask_llm
 from bot_utils import build_reply_payload
-from config import BOT_TOKEN, RUN_LOG_URL, TELEGRAM_WEBHOOK_URL
+from config import (
+    BOT_TOKEN,
+    RUN_LOG_URL,
+    TELEGRAM_WEBHOOK_URL,
+)
 from logger import log_event
 
 
-app = FastAPI(title="TDS Telegram Bot")
-
-
-class Prompt(BaseModel):
-    prompt: str
+app = FastAPI(
+    title="TDS Telegram Bot"
+)
 
 
 # ============================================================
-# Conversation memory
+# Conversation state
 # ============================================================
 
-# chat_id -> list of previous messages
-#
-# Example:
-#
-# {
-#   123456789: [
-#       {"role": "user", "content": "..."},
-#       {"role": "assistant", "content": "..."},
-#   ]
-# }
-#
-# This is in-memory state. It survives normally while the Render
-# instance remains running.
 conversation_history = {}
 
+MAX_HISTORY_MESSAGES = 12
 
-MAX_HISTORY_MESSAGES = 20
+
+# Telegram update IDs already processed.
+processed_updates = set()
+
+MAX_PROCESSED_UPDATES = 1000
 
 
 def get_history(chat_id):
-    return conversation_history.get(chat_id, [])
+
+    return conversation_history.get(
+        chat_id,
+        [],
+    )
 
 
-def add_to_history(chat_id, role, content):
+def add_history(
+    chat_id,
+    role,
+    content,
+):
+
     if chat_id not in conversation_history:
+
         conversation_history[chat_id] = []
 
-    conversation_history[chat_id].append(
+    conversation_history[
+        chat_id
+    ].append(
         {
             "role": role,
             "content": content,
         }
     )
 
-    # Keep memory bounded.
-    conversation_history[chat_id] = conversation_history[chat_id][
-        -MAX_HISTORY_MESSAGES:
-    ]
+    conversation_history[
+        chat_id
+    ] = conversation_history[
+        chat_id
+    ][-MAX_HISTORY_MESSAGES:]
 
 
 # ============================================================
@@ -69,6 +76,7 @@ def add_to_history(chat_id, role, content):
 
 @app.get("/")
 def home():
+
     return {
         "status": "running",
         "project": "TDS Telegram Bot",
@@ -76,25 +84,35 @@ def home():
 
 
 # ============================================================
-# Telegram webhook setup
+# Startup
 # ============================================================
 
 @app.on_event("startup")
 def set_telegram_webhook():
 
     if not BOT_TOKEN:
-        print("ERROR: BOT_TOKEN is missing")
+
+        print(
+            "ERROR: BOT_TOKEN is missing"
+        )
+
         return
 
     if not TELEGRAM_WEBHOOK_URL:
-        print("ERROR: TELEGRAM_WEBHOOK_URL is missing")
+
+        print(
+            "ERROR: TELEGRAM_WEBHOOK_URL is missing"
+        )
+
         return
 
     telegram_api_url = (
-        f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+        "https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/setWebhook"
     )
 
     try:
+
         response = requests.post(
             telegram_api_url,
             json={
@@ -103,26 +121,50 @@ def set_telegram_webhook():
             timeout=10,
         )
 
-        print("Telegram webhook setup:")
-        print(response.text)
+        print(
+            "Telegram webhook setup:"
+        )
+
+        print(
+            response.text
+        )
 
     except Exception as e:
-        print("Webhook setup failed:")
-        print(str(e))
+
+        print(
+            "Webhook setup failed:"
+        )
+
+        print(
+            str(e)
+        )
 
 
 # ============================================================
 # Manual /chat endpoint
 # ============================================================
 
+class Prompt(BaseModel):
+
+    prompt: str
+
+
 @app.post("/chat")
 def chat(data: Prompt):
 
     try:
-        answer = ask_llm(data.prompt)
+
+        answer = ask_llm(
+            data.prompt
+        )
 
     except Exception as e:
-        print("CHAT LLM ERROR:", repr(e))
+
+        print(
+            "CHAT LLM ERROR:",
+            repr(e),
+        )
+
         answer = ""
 
     log_event(
@@ -144,46 +186,136 @@ def chat(data: Prompt):
 # ============================================================
 
 @app.post("/telegram-webhook")
-async def telegram_webhook(request: Request):
+async def telegram_webhook(
+    request: Request,
+):
 
     try:
+
         update = await request.json()
 
     except Exception as e:
-        print("Invalid Telegram JSON:", repr(e))
-        return {"ok": True}
 
-    print("===== TELEGRAM UPDATE =====")
-    print(update)
+        print(
+            "Invalid Telegram JSON:",
+            repr(e),
+        )
 
-    # Ignore non-message Telegram updates.
+        return {
+            "ok": True
+        }
+
+    print(
+        "===== TELEGRAM UPDATE ====="
+    )
+
+    print(
+        update
+    )
+
+    update_id = update.get(
+        "update_id"
+    )
+
+    # --------------------------------------------------------
+    # Avoid processing the same Telegram update twice.
+    # --------------------------------------------------------
+
+    if update_id is not None:
+
+        if update_id in processed_updates:
+
+            print(
+                "Duplicate update ignored:",
+                update_id,
+            )
+
+            return {
+                "ok": True
+            }
+
+        processed_updates.add(
+            update_id
+        )
+
+        # Keep memory bounded.
+        if (
+            len(processed_updates)
+            > MAX_PROCESSED_UPDATES
+        ):
+
+            processed_updates.pop()
+
+
+    # --------------------------------------------------------
+    # Validate message.
+    # --------------------------------------------------------
+
     if "message" not in update:
-        return {"ok": True}
 
-    message = update["message"]
+        return {
+            "ok": True
+        }
 
-    # Ignore non-text messages.
+    message = update[
+        "message"
+    ]
+
     if "text" not in message:
-        return {"ok": True}
 
-    user_message = message["text"]
-    chat_id = message["chat"]["id"]
+        return {
+            "ok": True
+        }
 
-    print("===== CHAT ID =====")
-    print(chat_id)
+    user_message = message[
+        "text"
+    ]
 
-    print("===== USER MESSAGE =====")
-    print(user_message)
+    chat_id = message[
+        "chat"
+    ]["id"]
 
-    # Get previous conversation.
-    history = get_history(chat_id)
 
-    print("===== HISTORY =====")
-    print(history)
+    print(
+        "===== CHAT ID ====="
+    )
+
+    print(
+        chat_id
+    )
+
+    print(
+        "===== USER MESSAGE ====="
+    )
+
+    print(
+        user_message
+    )
+
+
+    # --------------------------------------------------------
+    # Previous conversation.
+    # --------------------------------------------------------
+
+    history = get_history(
+        chat_id
+    )
+
+    print(
+        "===== HISTORY ====="
+    )
+
+    print(
+        history
+    )
+
+
+    # --------------------------------------------------------
+    # Ask LLM.
+    # --------------------------------------------------------
 
     try:
 
-        # Give previous turns to the LLM.
         answer = ask_llm(
             user_message,
             history=history,
@@ -191,44 +323,80 @@ async def telegram_webhook(request: Request):
 
     except Exception as e:
 
-        print("===== TELEGRAM LLM ERROR =====")
-        print(type(e).__name__)
-        print(str(e))
-        print("==============================")
+        print(
+            "===== TELEGRAM LLM ERROR ====="
+        )
+
+        print(
+            type(e).__name__
+        )
+
+        print(
+            str(e)
+        )
+
+        print(
+            "=============================="
+        )
 
         answer = ""
 
-    print("===== RAW ANSWER =====")
-    print(repr(answer))
 
-    # Save the current user message and model response.
-    add_to_history(
+    print(
+        "===== RAW ANSWER ====="
+    )
+
+    print(
+        repr(answer)
+    )
+
+
+    # --------------------------------------------------------
+    # Save conversation.
+    # --------------------------------------------------------
+
+    add_history(
         chat_id,
         "user",
         user_message,
     )
 
-    add_to_history(
+    add_history(
         chat_id,
         "assistant",
         answer,
     )
 
-    # Log the raw model response.
+
+    # --------------------------------------------------------
+    # Log.
+    # --------------------------------------------------------
+
     log_event(
         user_message,
         answer,
     )
 
-    # Build exact requested JSON.
+
+    # --------------------------------------------------------
+    # Build exact final JSON.
+    # --------------------------------------------------------
+
     payload = build_reply_payload(
         user_message,
         answer,
         RUN_LOG_URL,
     )
 
-    print("===== FINAL PAYLOAD =====")
-    print(payload)
+
+    print(
+        "===== FINAL PAYLOAD ====="
+    )
+
+    print(
+        payload
+    )
+
 
     reply_text = json.dumps(
         payload,
@@ -236,11 +404,23 @@ async def telegram_webhook(request: Request):
         separators=(",", ":"),
     )
 
-    print("===== TELEGRAM REPLY =====")
-    print(reply_text)
+
+    print(
+        "===== TELEGRAM REPLY ====="
+    )
+
+    print(
+        reply_text
+    )
+
+
+    # --------------------------------------------------------
+    # Send Telegram response.
+    # --------------------------------------------------------
 
     telegram_api_url = (
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        "https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/sendMessage"
     )
 
     try:
@@ -254,15 +434,28 @@ async def telegram_webhook(request: Request):
             timeout=20,
         )
 
-        print("Telegram response:")
-        print(response.text)
+        print(
+            "Telegram response:"
+        )
+
+        print(
+            response.text
+        )
 
     except Exception as e:
 
-        print("Failed to send Telegram message:")
-        print(str(e))
+        print(
+            "Failed to send Telegram message:"
+        )
 
-    return {"ok": True}
+        print(
+            str(e)
+        )
+
+
+    return {
+        "ok": True
+    }
 
 
 # ============================================================
@@ -272,12 +465,16 @@ async def telegram_webhook(request: Request):
 @app.get("/run.jsonl")
 def get_run_log():
 
-    if not os.path.exists("run.jsonl"):
+    if not os.path.exists(
+        "run.jsonl"
+    ):
+
         open(
             "run.jsonl",
             "a",
             encoding="utf-8",
         ).close()
+
 
     return FileResponse(
         "run.jsonl",

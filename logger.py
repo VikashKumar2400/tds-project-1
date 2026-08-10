@@ -5,11 +5,18 @@ from datetime import datetime, timezone
 LOG_FILE = "run.jsonl"
 
 
-def log_event(question, answer):
+def log_event(
+    question,
+    answer,
+):
 
     record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
+
         "question": question,
+
         "answer": answer,
     }
 
