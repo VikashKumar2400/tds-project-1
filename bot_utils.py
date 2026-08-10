@@ -5,12 +5,7 @@ from typing import Any
 
 def _extract_json_object(text: str) -> Any:
     """
-    Extract a JSON object from the LLM response.
-
-    Handles:
-    1. Pure JSON
-    2. ```json ... ``` blocks
-    3. JSON surrounded by extra text
+    Extract the first valid JSON object from the model response.
     """
 
     if not text:
@@ -18,29 +13,29 @@ def _extract_json_object(text: str) -> Any:
 
     cleaned = text.strip()
 
-    # Remove markdown code fences
+    # Remove Markdown fences if the model accidentally adds them.
     cleaned = re.sub(
         r"^```(?:json)?\s*",
         "",
         cleaned,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
 
     cleaned = re.sub(
         r"\s*```$",
         "",
-        cleaned
+        cleaned,
     )
 
     cleaned = cleaned.strip()
 
-    # Try parsing the complete response
+    # First try the complete response.
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-    # Try extracting JSON object from surrounding text
+    # Then try extracting the JSON object.
     start = cleaned.find("{")
     end = cleaned.rfind("}")
 
@@ -55,63 +50,104 @@ def _extract_json_object(text: str) -> Any:
     return None
 
 
+def _question_requires_log_url(user_prompt: str) -> bool:
+    """
+    Determine whether the user's requested JSON shape explicitly contains
+    a log_url field.
+
+    Example:
+
+    {"value": <number>}
+        -> False
+
+    {"answer": {"sd": <number>}, "log_url": "..."}
+        -> True
+    """
+
+    return "log_url" in user_prompt
+
+
 def build_reply_payload(
     user_prompt: str,
     model_reply: str,
-    log_url: str
+    log_url: str,
 ) -> dict:
     """
-    Build the final response required by the TDS grader.
+    Build the exact JSON object expected by the question.
 
-    The LLM is responsible for solving the question and
-    determining the requested answer structure.
+    IMPORTANT:
+    We do NOT automatically wrap bare JSON objects.
 
-    The application is responsible for supplying the
-    real public log URL.
+    If the user asks for:
+        {"value": 391}
+
+    return:
+        {"value": 391}
+
+    If the user asks for:
+        {"answer": {"sd": 2.0}, "log_url": "..."}
+
+    return:
+        {"answer": {"sd": 2.0}, "log_url": "..."}
     """
 
     parsed = _extract_json_object(model_reply)
 
-    # If the model failed to return valid JSON
+    # If model failed to produce JSON, provide a valid JSON fallback.
     if not isinstance(parsed, dict):
+        if _question_requires_log_url(user_prompt):
+            return {
+                "answer": model_reply.strip() if model_reply else "",
+                "log_url": log_url,
+            }
+
         return {
-            "answer": model_reply.strip() if model_reply else "",
-            "log_url": log_url
+            "error": model_reply.strip() if model_reply else ""
+        }
+
+    needs_log_url = _question_requires_log_url(user_prompt)
+
+    # ---------------------------------------------------------
+    # CASE 1:
+    # User explicitly requested log_url.
+    # ---------------------------------------------------------
+    if needs_log_url:
+
+        # If model returned:
+        #
+        # {"answer": {...}, "log_url": "..."}
+        #
+        # preserve the answer and replace log_url with our real URL.
+        if "answer" in parsed:
+            return {
+                "answer": parsed["answer"],
+                "log_url": log_url,
+            }
+
+        # If model returned the inner object directly:
+        #
+        # {"sd": 2.0}
+        #
+        # wrap it because the user's requested schema contains
+        # "answer" and "log_url".
+        return {
+            "answer": parsed,
+            "log_url": log_url,
         }
 
     # ---------------------------------------------------------
-    # Case 1:
-    # Model already returned:
+    # CASE 2:
+    # User did NOT request log_url.
     #
-    # {"answer": {...}, "log_url": "..."}
-    #
-    # Keep the answer but ALWAYS replace log_url.
-    # ---------------------------------------------------------
-    if "answer" in parsed:
-
-        answer = parsed["answer"]
-
-        return {
-            "answer": answer,
-            "log_url": log_url
-        }
-
-    # ---------------------------------------------------------
-    # Case 2:
-    # Model returned the requested object directly.
-    #
-    # Example:
-    # {"value": 391}
-    #
-    # Convert it to the required grader format:
-    #
-    # {"answer": {"value": 391}, "log_url": "..."}
+    # Return the model's object EXACTLY as requested.
     # ---------------------------------------------------------
 
-    return {
-        "answer": parsed,
-        "log_url": log_url
-    }
+    # If the model incorrectly added the wrapper even though the
+    # user did not request it, unwrap it.
+    if set(parsed.keys()) == {"answer", "log_url"}:
+        return parsed["answer"]
+
+    return parsed
 
 
 def json_response(payload: dict) -> str:
@@ -122,5 +158,5 @@ def json_response(payload: dict) -> str:
     return json.dumps(
         payload,
         ensure_ascii=False,
-        separators=(",", ":")
+        separators=(",", ":"),
     )
