@@ -178,9 +178,8 @@ by the user. Use it to answer the question.
 
     try:
         response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            temperature=0,
+        model=MODEL,
+        messages=messages,
         )
 
         content = response.choices[0].message.content or ""
